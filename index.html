@@ -60,6 +60,7 @@
   .chip{padding:8px 12px;border-radius:8px;border:1px solid rgba(12,14,20,0.06);min-width:64px;text-align:center;cursor:pointer;user-select:none;font-weight:700;}
   .chip.active.yes{background:rgba(40,167,69,0.12);border-color:rgba(40,167,69,0.18);color:var(--success);}
   .chip.active.no{background:rgba(224,75,75,0.12);border-color:rgba(224,75,75,0.16);color:var(--danger);}
+  .chip.active { border-color: rgba(11,122,255,0.18); color: var(--primary); background: rgba(11,122,255,0.06); }
   .small{font-size:13px;color:var(--muted);}
   .title-big{font-size:18px;font-weight:800;margin-bottom:6px;}
   .upload-area{background:#fff;padding:12px;border-radius:10px;display:flex;flex-direction:column;gap:8px;align-items:center;justify-content:center;border:2px dashed rgba(11,122,255,0.08);min-height:120px;}
@@ -259,6 +260,7 @@ const screens = Array.from(document.querySelectorAll('.screen'));
 function show(id){
   screens.forEach(s=>s.classList.remove('active'));
   const el = document.getElementById(id);
+  if(!el) return;
   el.classList.add('active');
   window.currentScreen = id;
   Array.from(el.querySelectorAll('.card-scroll')).forEach(c=>c.scrollTop=0);
@@ -302,7 +304,7 @@ const storesField = [
   {id:'f3',name:'XAC Store',pic:'Mr. Sam',addr:'8 Old Road',img:''},
 ];
 
-/* ---------- status helpers (persisted) ---------- */
+/* ---------- status helpers (persisted in localStorage) ---------- */
 function getStatus(mode, id){
   return localStorage.getItem('status_'+mode+'_'+id) || 'pending';
 }
@@ -359,7 +361,7 @@ function startMode(mode){
   }
 }
 
-/* ---------- Embedded questions (no upload required) ---------- */
+/* ---------- QUESTIONS (including new selects) ---------- */
 let allQuestions = [
   {id:'q2', q:'Is the person in charge (PIC) Mr. A?', type:'yesno', expectedOption:'Yes', applicableTo:['phone','field']},
   {id:'q3', q:'Is the store located at A Street?', type:'yesno', expectedOption:'Yes', applicableTo:['phone','field']},
@@ -368,10 +370,28 @@ let allQuestions = [
   {id:'q6', q:'Is the store’s contact number +234809123?', type:'yesno', expectedOption:'Yes', applicableTo:['phone','field']},
   {id:'q10', q:'For So Klin, do you sell more than 1000 cartons per week?', type:'yesno', expectedOption:'No', applicableTo:['phone','field']},
   {id:'q14', q:'Do you sell only So Klin and Viva brands?', type:'yesno', expectedOption:'Yes', applicableTo:['phone','field']},
-  {id:'q15', q:'Is your So Klin stock supplied by EMA?', type:'yesno', expectedOption:'Yes', applicableTo:['phone','field']}
+  {id:'q15', q:'Is your So Klin stock supplied by EMA?', type:'yesno', expectedOption:'Yes', applicableTo:['phone','field']},
+
+  // NEW: Good Mama 50g weekly sales (3 options)
+  {id:'q16',
+   q:'Your weekly sales for the product Good Mama 50g is?',
+   type:'select',
+   options:['Less than 5 CTN','Between 5 and 10 CTN','Above 10 CTN'],
+   expectedOption:'',
+   applicableTo:['phone','field']
+  },
+
+  // NEW: So Klin 100g weekly sales (2 options)
+  {id:'q17',
+   q:'Your weekly sales for the product Supreme 100g is?',
+   type:'select',
+   options:['Less than 5 CTN','Above 5 CTN'],
+   expectedOption:'',
+   applicableTo:['phone','field']
+  }
 ];
 
-/* ---------- pick random 3 questions ---------- */
+/* ---------- pick random questions ---------- */
 function pickRandomQuestions(mode, count = 3){
   const pool = allQuestions.filter(q => !q.applicableTo || q.applicableTo.includes(mode));
   const out = [];
@@ -384,6 +404,35 @@ function pickRandomQuestions(mode, count = 3){
     out.push(JSON.parse(JSON.stringify(pool[idx])));
   }
   return out;
+}
+
+/* ---------- answer storage helpers ----------
+   - yes/no stored as 1/0
+   - select stored as string option
+   - phone answers in sessionStorage key 'answers_phone_<storeId>'
+   - field answers in sessionStorage key 'answers_field_<storeId>'
+*/
+function setAnswer(storeId,qid,val,mode){
+  const key = 'answers_'+mode+'_'+storeId;
+  const data = JSON.parse(sessionStorage.getItem(key)||'{}');
+  if (typeof val === 'boolean') data[qid] = (val ? 1 : 0);
+  else data[qid] = val;
+  sessionStorage.setItem(key, JSON.stringify(data));
+}
+function getAnswer(storeId,qid,mode){
+  const key = 'answers_'+mode+'_'+storeId;
+  const data = JSON.parse(sessionStorage.getItem(key)||'{}');
+  if (!(qid in data)) return null;
+  const v = data[qid];
+  if (v === 1) return true;
+  if (v === 0) return false;
+  return v;
+}
+function setFieldAnswer(storeId,qid,val){
+  setAnswer(storeId,qid,val,'field');
+}
+function getFieldAnswer(storeId,qid){
+  return getAnswer(storeId,qid,'field');
 }
 
 /* ---------- phone flow ---------- */
@@ -409,55 +458,81 @@ function populatePhoneQuestions(){
   if(!currentPhone || !currentPhone.id) return alert('No store selected');
   currentPhoneQs.forEach(q=>{
     const div = document.createElement('div'); div.className='q';
-    div.innerHTML = `<div style="flex:1"><div style="font-weight:700">${q.q}</div><div class="small">question id: ${q.id}</div></div>`;
-    const yesno = document.createElement('div'); yesno.className='yesno';
-    const yes = document.createElement('div'); yes.className='chip'; yes.textContent='YES';
-    const no = document.createElement('div'); no.className='chip'; no.textContent='NO';
-    yes.addEventListener('click', ()=>{ setAnswer(currentPhone.id,q.id,true,'phone'); yes.classList.add('active','yes'); no.classList.remove('active','no'); });
-    no.addEventListener('click', ()=>{ setAnswer(currentPhone.id,q.id,false,'phone'); no.classList.add('active','no'); yes.classList.remove('active','yes'); });
-    const prev = getAnswer(currentPhone.id,q.id,'phone');
-    if(prev===true) yes.classList.add('active','yes');
-    if(prev===false) no.classList.add('active','no');
-    yesno.appendChild(yes); yesno.appendChild(no);
-    div.appendChild(yesno);
+    const left = document.createElement('div'); left.style.flex = '1';
+    left.innerHTML = `<div style="font-weight:700">${q.q}</div><div class="small">question id: ${q.id}</div>`;
+    div.appendChild(left);
+
+    if(!q.type || q.type === 'yesno'){
+      const yesno = document.createElement('div'); yesno.className='yesno';
+      const yes = document.createElement('div'); yes.className='chip'; yes.textContent='YES';
+      const no = document.createElement('div'); no.className='chip'; no.textContent='NO';
+      yes.addEventListener('click', ()=>{ setAnswer(currentPhone.id,q.id,true,'phone'); yes.classList.add('active','yes'); no.classList.remove('active','no'); });
+      no.addEventListener('click', ()=>{ setAnswer(currentPhone.id,q.id,false,'phone'); no.classList.add('active','no'); yes.classList.remove('active','yes'); });
+      const prev = getAnswer(currentPhone.id,q.id,'phone');
+      if(prev===true) yes.classList.add('active','yes');
+      if(prev===false) no.classList.add('active','no');
+      yesno.appendChild(yes); yesno.appendChild(no);
+      div.appendChild(yesno);
+    } else if (q.type === 'select'){
+      const opts = document.createElement('div'); opts.className='yesno';
+      q.options.forEach(opt=>{
+        const c = document.createElement('div'); c.className='chip'; c.textContent = opt;
+        c.addEventListener('click', ()=>{
+          setAnswer(currentPhone.id,q.id,opt,'phone');
+          Array.from(opts.children).forEach(ch => ch.classList.remove('active'));
+          c.classList.add('active');
+        });
+        opts.appendChild(c);
+      });
+      const prev = getAnswer(currentPhone.id,q.id,'phone');
+      if(prev && typeof prev === 'string'){
+        Array.from(opts.children).forEach(ch=>{
+          if(ch.textContent === prev) ch.classList.add('active');
+        });
+      }
+      div.appendChild(opts);
+    }
+
     el.appendChild(div);
   });
   const card = document.getElementById('phoneQuestionsCard');
   if(card) card.scrollTop = 0;
 }
 
-function setAnswer(storeId,qid,val,mode){
-  const key = 'answers_'+mode+'_'+storeId;
-  const data = JSON.parse(sessionStorage.getItem(key)||'{}');
-  data[qid]= (val===true?1:0);
-  sessionStorage.setItem(key, JSON.stringify(data));
-}
-function getAnswer(storeId,qid,mode){
-  const key = 'answers_'+mode+'_'+storeId;
-  const data = JSON.parse(sessionStorage.getItem(key)||'{}');
-  if(qid in data) return data[qid]===1;
-  return null;
-}
-
+/* ---------- phone submit ---------- */
 document.getElementById('phoneSubmit').addEventListener('click', ()=>{
   if(!currentPhone) return alert('No store selected');
   const key = 'answers_phone_'+currentPhone.id;
   const data = JSON.parse(sessionStorage.getItem(key)||'{}');
   const allAnswered = currentPhoneQs.every(q=> q.id in data);
   if(!allAnswered) return alert('Please answer all questions.');
+  // prepare comparisons (useful for backend)
   const comparisons = currentPhoneQs.map(q => {
-    const got = data[q.id]===1;
-    const expectedOpt = (q.expectedOption||'').toString().trim().toLowerCase();
-    const expectedBool = expectedOpt === 'yes' ? true : expectedOpt === 'no' ? false : null;
-    const match = expectedBool === null ? null : (got === expectedBool);
-    return {qid:q.id, question:q.q, answer: got ? 'Yes' : 'No', expected: expectedOpt || 'N/A', match};
+    const raw = data[q.id];
+    let got;
+    if(q.type === 'select') got = raw || 'N/A';
+    else got = (raw===1) ? 'Yes' : 'No';
+
+    const expectedOpt = (q.expectedOption||'').toString().trim();
+    let match = null;
+    if(expectedOpt.length){
+      if(q.type === 'select'){
+        match = expectedOpt.toLowerCase() === (''+raw).toLowerCase();
+      } else {
+        const expectedBool = expectedOpt.toLowerCase() === 'yes' ? 1 : expectedOpt.toLowerCase() === 'no' ? 0 : null;
+        if(expectedBool === null) match = null; else match = (raw === expectedBool);
+      }
+    }
+    return { qid: q.id, question: q.q, answer: got, expected: expectedOpt || 'N/A', match };
   });
-  const matchedCount = comparisons.filter(c=>c.match===true).length;
-  const mismatch = comparisons.filter(c=>c.match===false);
-  document.getElementById('phone-success-sub').textContent = `Phone Number: ${currentPhone.phone} — PIC name: ${currentPhone.pic}`;
-  // mark this store as completed and update list
+
+  // mark completed
   setStatus('phone', currentPhone.id, 'completed');
   populatePhoneList();
+  document.getElementById('phone-success-sub').textContent = `Phone Number: ${currentPhone.phone} — PIC name: ${currentPhone.pic}`;
+
+  // optional: send `comparisons` to server here
+
   navigateTo('screen-phone-success');
 });
 
@@ -485,17 +560,41 @@ function populateFieldQuestions(){
   if(!currentField || !currentField.id) return alert('No store selected');
   currentFieldQs.forEach(q=>{
     const div = document.createElement('div'); div.className='q';
-    div.innerHTML = `<div style="flex:1"><div style="font-weight:700">${q.q}</div><div class="small">question id: ${q.id}</div></div>`;
-    const yesno = document.createElement('div'); yesno.className='yesno';
-    const yes = document.createElement('div'); yes.className='chip'; yes.textContent='YES';
-    const no = document.createElement('div'); no.className='chip'; no.textContent='NO';
-    yes.addEventListener('click', ()=>{ setFieldAnswer(currentField.id,q.id,true); yes.classList.add('active','yes'); no.classList.remove('active','no'); });
-    no.addEventListener('click', ()=>{ setFieldAnswer(currentField.id,q.id,false); no.classList.add('active','no'); yes.classList.remove('active','yes'); });
-    const prev = getFieldAnswer(currentField.id,q.id);
-    if(prev===true) yes.classList.add('active','yes');
-    if(prev===false) no.classList.add('active','no');
-    yesno.appendChild(yes); yesno.appendChild(no);
-    div.appendChild(yesno);
+    const left = document.createElement('div'); left.style.flex = '1';
+    left.innerHTML = `<div style="font-weight:700">${q.q}</div><div class="small">question id: ${q.id}</div>`;
+    div.appendChild(left);
+
+    if(!q.type || q.type === 'yesno'){
+      const yesno = document.createElement('div'); yesno.className='yesno';
+      const yes = document.createElement('div'); yes.className='chip'; yes.textContent='YES';
+      const no = document.createElement('div'); no.className='chip'; no.textContent='NO';
+      yes.addEventListener('click', ()=>{ setFieldAnswer(currentField.id,q.id,true); yes.classList.add('active','yes'); no.classList.remove('active','no'); });
+      no.addEventListener('click', ()=>{ setFieldAnswer(currentField.id,q.id,false); no.classList.add('active','no'); yes.classList.remove('active','yes'); });
+      const prev = getFieldAnswer(currentField.id,q.id);
+      if(prev===true) yes.classList.add('active','yes');
+      if(prev===false) no.classList.add('active','no');
+      yesno.appendChild(yes); yesno.appendChild(no);
+      div.appendChild(yesno);
+    } else if (q.type === 'select'){
+      const opts = document.createElement('div'); opts.className='yesno';
+      q.options.forEach(opt=>{
+        const c = document.createElement('div'); c.className='chip'; c.textContent = opt;
+        c.addEventListener('click', ()=>{
+          setFieldAnswer(currentField.id,q.id,opt);
+          Array.from(opts.children).forEach(ch => ch.classList.remove('active'));
+          c.classList.add('active');
+        });
+        opts.appendChild(c);
+      });
+      const prev = getFieldAnswer(currentField.id,q.id);
+      if(prev && typeof prev === 'string'){
+        Array.from(opts.children).forEach(ch=>{
+          if(ch.textContent === prev) ch.classList.add('active');
+        });
+      }
+      div.appendChild(opts);
+    }
+
     el.appendChild(div);
   });
 
@@ -507,9 +606,6 @@ function populateFieldQuestions(){
 
   const cs = document.querySelector('#screen-field-questions .card-scroll'); if(cs) cs.scrollTop = 0;
 }
-
-function setFieldAnswer(storeId,qid,val){ const key = 'answers_field_'+storeId; const data = JSON.parse(sessionStorage.getItem(key)||'{}'); data[qid]= (val===true?1:0); sessionStorage.setItem(key, JSON.stringify(data)); }
-function getFieldAnswer(storeId,qid){ const key = 'answers_field_'+storeId; const data = JSON.parse(sessionStorage.getItem(key)||'{}'); if(qid in data) return data[qid]===1; return null; }
 
 /* ---------- photo handling ---------- */
 const photoInput = document.getElementById('photoInput');
@@ -537,20 +633,35 @@ document.getElementById('fieldSubmit').addEventListener('click', ()=>{
   const allAnswered = currentFieldQs.every(q=> q.id in data);
   if(!allAnswered) return alert('Please answer all questions.');
   if(!photo) return alert('Please upload a photo.');
+
   const comparisons = currentFieldQs.map(q=>{
-    const got = data[q.id]===1;
-    const expectedOpt = (q.expectedOption||'').toString().trim().toLowerCase();
-    const expectedBool = expectedOpt === 'yes' ? true : expectedOpt === 'no' ? false : null;
-    const match = expectedBool === null ? null : (got === expectedBool);
-    return {qid:q.id, question:q.q, answer: got ? 'Yes' : 'No', expected: expectedOpt || 'N/A', match};
+    const raw = data[q.id];
+    let got;
+    if(q.type === 'select') got = raw || 'N/A';
+    else got = (raw===1) ? 'Yes' : 'No';
+
+    const expectedOpt = (q.expectedOption||'').toString().trim();
+    let match = null;
+    if(expectedOpt.length){
+      if(q.type === 'select'){
+        match = expectedOpt.toLowerCase() === (''+raw).toLowerCase();
+      } else {
+        const expectedBool = expectedOpt.toLowerCase() === 'yes' ? 1 : expectedOpt.toLowerCase() === 'no' ? 0 : null;
+        if(expectedBool === null) match = null; else match = (raw === expectedBool);
+      }
+    }
+    return { qid: q.id, question: q.q, answer: got, expected: expectedOpt || 'N/A', match };
   });
-  const matchedCount = comparisons.filter(c=>c.match===true).length;
-  const mismatch = comparisons.filter(c=>c.match===false);
-  document.getElementById('field-success-sub').textContent = `Store: ${currentField.name} — PIC: ${currentField.pic}`;
-  const sthumb = document.getElementById('field-success-thumb'); sthumb.src = photo; sthumb.style.display='block';
+
   // persist completed status and update list
   setStatus('field', currentField.id, 'completed');
   populateFieldList();
+
+  document.getElementById('field-success-sub').textContent = `Store: ${currentField.name} — PIC: ${currentField.pic}`;
+  const sthumb = document.getElementById('field-success-thumb'); sthumb.src = photo; sthumb.style.display='block';
+
+  // optional: send `comparisons` + photo to backend here
+
   navigateTo('screen-field-success');
 });
 
